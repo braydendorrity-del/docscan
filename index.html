@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DocScan">
+<title>DocScan</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,300;9..144,600;9..144,800&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f0e8;
+  --surface: #ede7d8;
+  --surface2: #e4dcc8;
+  --ink: #1a1612;
+  --ink2: #4a4238;
+  --muted: #8a7d6e;
+  --accent: #c84b1f;
+  --accent2: #e8632e;
+  --green: #2d6a4f;
+  --green2: #40916c;
+  --border: #cfc5b0;
+  --shadow: rgba(26,22,18,0.12);
+}
+
+body {
+  font-family: 'DM Mono', monospace;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+/* Grain overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 0.6;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1.5px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.logo {
+  font-family: 'Fraunces', serif;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.logo em { color: var(--accent); font-style: normal; }
+
+#drive-auth-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--ink2);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+#drive-auth-btn:hover { border-color: var(--ink); background: var(--surface2); }
+#drive-auth-btn.connected { border-color: var(--green); color: var(--green); background: #d8f3dc; }
+#drive-auth-btn svg { flex-shrink: 0; }
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 18px;
+  max-width: 500px;
+  margin: 0 auto;
+  width: 100%;
+  padding-bottom: 40px;
+}
+
+/* ── Scan Area ── */
+.scan-area {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 18px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 12px var(--shadow);
+}
+.scan-area.has-image { border-color: var(--ink2); border-style: solid; }
+
+#camera-feed {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: 16px;
+  display: none;
+}
+#camera-feed.on { display: block; }
+
+#preview-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  border-radius: 16px;
+  display: none;
+}
+#preview-canvas.on { display: block; }
+
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 20px;
+}
+.placeholder.hidden { display: none; }
+
+.doc-icon {
+  width: 72px; height: 72px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.doc-icon::before {
+  content: '';
+  position: absolute;
+  top: -1px; right: -1px;
+  width: 18px; height: 18px;
+  background: var(--bg);
+  border-left: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  border-radius: 0 8px 0 8px;
+}
+.doc-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+.doc-lines span {
+  display: block;
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+}
+.doc-lines span:nth-child(1) { width: 32px; }
+.doc-lines span:nth-child(2) { width: 28px; }
+.doc-lines span:nth-child(3) { width: 24px; }
+
+.placeholder-text {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+}
+.placeholder-text strong {
+  display: block;
+  font-family: 'Fraunces', serif;
+  font-size: 18px;
+  color: var(--ink2);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* corner brackets */
+.brackets {
+  position: absolute; inset: 12px;
+  pointer-events: none;
+  display: none;
+}
+.brackets.on { display: block; }
+.brackets::before, .brackets::after,
+.brackets span::before, .brackets span::after {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  border-color: var(--accent);
+  border-style: solid;
+}
+.brackets::before { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.brackets::after { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.brackets span::before { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+.brackets span::after { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+/* scan line animation */
+.scanline {
+  position: absolute; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent) 30%, var(--accent2) 70%, transparent 100%);
+  display: none;
+  animation: scanline 2s ease-in-out infinite;
+  box-shadow: 0 0 8px var(--accent);
+}
+.scanline.on { display: block; }
+@keyframes scanline {
+  0% { top: 5%; opacity: 0; }
+  5% { opacity: 1; }
+  95% { opacity: 1; }
+  100% { top: 95%; opacity: 0; }
+}
+
+/* ── Controls ── */
+.controls { display: flex; gap: 10px; }
+
+.btn {
+  flex: 1;
+  padding: 13px 12px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-transform: uppercase;
+}
+.btn:active { transform: scale(0.96); }
+.btn:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+
+.btn-outline {
+  background: var(--bg);
+  color: var(--ink2);
+  border-color: var(--border);
+  box-shadow: 0 1px 4px var(--shadow);
+}
+.btn-outline:hover:not(:disabled) { border-color: var(--ink); background: var(--surface); }
+
+.btn-capture {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(200,75,31,0.3);
+}
+.btn-capture:hover:not(:disabled) { background: var(--accent2); border-color: var(--accent2); }
+
+.btn-drive {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+  box-shadow: 0 2px 8px var(--shadow);
+  flex: unset;
+  width: 100%;
+  padding: 15px;
+  font-size: 12px;
+  border-radius: 14px;
+}
+.btn-drive:hover:not(:disabled) { background: var(--ink2); }
+.btn-drive.uploaded { background: var(--green); border-color: var(--green); }
+
+.btn-cancel {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── Pages strip ── */
+.section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.pages-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+.pages-strip::-webkit-scrollbar { height: 3px; }
+.pages-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.thumb {
+  flex-shrink: 0;
+  width: 56px; height: 72px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+  background: var(--surface2);
+}
+.thumb:hover { border-color: var(--accent); transform: translateY(-2px); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb .del {
+  position: absolute; top: 2px; right: 2px;
+  width: 16px; height: 16px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 9px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+  font-weight: bold;
+}
+.thumb:hover .del { opacity: 1; }
+.thumb .num {
+  position: absolute; bottom: 3px; left: 0; right: 0;
+  text-align: center;
+  font-size: 9px;
+  color: var(--muted);
+  background: rgba(245,240,232,0.85);
+  padding: 1px 0;
+}
+
+.add-thumb {
+  flex-shrink: 0;
+  width: 56px; height: 72px;
+  border-radius: 8px;
+  border: 1.5px dashed var(--border);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  font-size: 22px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+}
+.add-thumb:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Options ── */
+.options {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 1px 6px var(--shadow);
+}
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.opt-label { font-size: 11px; color: var(--muted); }
+
+.pill-group {
+  display: flex;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  gap: 2px;
+}
+.pill {
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pill.active { background: var(--accent); color: #fff; font-weight: 500; }
+
+input[type="text"] {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--ink);
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input[type="text"]:focus { border-color: var(--ink); }
+input[type="text"]::placeholder { color: var(--muted); }
+
+/* ── Status bar ── */
+.status {
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  transition: all 0.2s;
+  background: var(--surface);
+}
+.status.ok { color: var(--green); border-color: var(--green2); background: #d8f3dc; }
+.status.err { color: var(--accent); border-color: var(--accent); background: #fde8e2; }
+.status.info { color: #1e6091; border-color: #74c0fc; background: #e7f5ff; }
+
+.spinner {
+  width: 13px; height: 13px; flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#file-input { display: none; }
+
+/* ── Setup instructions ── */
+.setup-box {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  display: none;
+}
+.setup-box.visible { display: block; }
+.setup-box h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--ink);
+}
+.setup-box p, .setup-box li {
+  font-size: 11px;
+  color: var(--ink2);
+  line-height: 1.7;
+}
+.setup-box ol { padding-left: 16px; }
+.setup-box code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  word-break: break-all;
+}
+.setup-box a { color: var(--accent); }
+
+.drive-link { color: var(--green); font-weight: 500; text-decoration: none; word-break: break-all; }
+.drive-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- ─────────────── HEADER ─────────────── -->
+<header>
+  <div class="logo">doc<em>scan</em></div>
+  <button id="drive-auth-btn" onclick="handleDriveAuth()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 11a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 0h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 7.91a16 16 0 0 0 8.18 8.18l.97-.97a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 17.92"/>
+    </svg>
+    <span id="auth-label">Connect Drive</span>
+  </button>
+</header>
+
+<!-- ─────────────── MAIN ─────────────── -->
+<main>
+
+  <!-- Scan viewport -->
+  <div class="scan-area" id="scan-area">
+    <video id="camera-feed" autoplay playsinline muted></video>
+    <canvas id="preview-canvas"></canvas>
+    <div class="brackets" id="brackets"><span></span></div>
+    <div class="scanline" id="scanline"></div>
+    <div class="placeholder" id="placeholder">
+      <div class="doc-icon">
+        <div class="doc-lines">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+      <div class="placeholder-text">
+        <strong>Ready to scan</strong>
+        Use camera or upload a photo
+      </div>
+    </div>
+  </div>
+
+  <!-- Primary controls -->
+  <div class="controls" id="controls-default">
+    <button class="btn btn-outline" id="camera-btn" onclick="startCamera()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+        <circle cx="12" cy="13" r="4"/>
+      </svg>
+      Camera
+    </button>
+    <button class="btn btn-outline" onclick="document.getElementById('file-input').click()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+      </svg>
+      Upload
+    </button>
+  </div>
+
+  <!-- Camera capture controls (hidden by default) -->
+  <div class="controls" id="controls-camera" style="display:none">
+    <button class="btn btn-capture" onclick="capturePhoto()">● Capture</button>
+    <button class="btn btn-cancel" onclick="stopCamera()">✕ Stop</button>
+  </div>
+
+  <input type="file" id="file-input" accept="image/*" multiple onchange="handleFiles(event)">
+
+  <!-- Pages strip -->
+  <div id="pages-section" style="display:none">
+    <div class="section-label">pages — <span id="page-count">0</span></div>
+    <div class="pages-strip" id="pages-strip"></div>
+  </div>
+
+  <!-- Options -->
+  <div class="options">
+    <div class="section-label">settings</div>
+    <div class="opt-row">
+      <span class="opt-label">enhancement</span>
+      <div class="pill-group">
+        <button class="pill active" onclick="setMode('bw',this)">B&amp;W</button>
+        <button class="pill" onclick="setMode('color',this)">Color</button>
+        <button class="pill" onclick="setMode('raw',this)">Raw</button>
+      </div>
+    </div>
+    <div class="opt-row">
+      <span class="opt-label">format</span>
+      <div class="pill-group">
+        <button class="pill active" onclick="setFormat('pdf',this)">PDF</button>
+        <button class="pill" onclick="setFormat('jpg',this)">JPG</button>
+      </div>
+    </div>
+    <div class="opt-row">
+      <span class="opt-label">filename</span>
+    </div>
+    <input type="text" id="filename" placeholder="e.g. invoice-april-2026">
+  </div>
+
+  <!-- Drive upload -->
+  <button class="btn btn-drive" id="upload-btn" onclick="sendToDrive()" disabled>
+    <svg width="16" height="16" viewBox="0 0 87.3 78" fill="currentColor" style="opacity:0.8;margin-right:2px">
+      <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#fff" opacity=".6"/>
+      <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#fff" opacity=".6"/>
+      <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#fff" opacity=".6"/>
+      <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#fff" opacity=".6"/>
+      <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#fff" opacity=".6"/>
+      <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#fff" opacity=".6"/>
+    </svg>
+    Send to Google Drive
+  </button>
+
+  <!-- Status -->
+  <div class="status" id="status">Add pages to get started</div>
+
+  <!-- Setup instructions (shown when needed) -->
+  <div class="setup-box" id="setup-box">
+    <h3>⚙️ One-time Drive setup</h3>
+    <p style="margin-bottom:10px">To upload to your Google Drive, you need a free API key. Here's how:</p>
+    <ol>
+      <li>Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a></li>
+      <li>Create a project → Enable <strong>Google Drive API</strong></li>
+      <li>Go to <strong>APIs &amp; Services → Credentials</strong></li>
+      <li>Create an <strong>OAuth 2.0 Client ID</strong> → Web application</li>
+      <li>Add this page's URL to <strong>Authorized JavaScript origins</strong></li>
+      <li>Paste your Client ID below and tap Save</li>
+    </ol>
+    <br>
+    <input type="text" id="client-id-input" placeholder="Paste Google OAuth Client ID here..." style="margin-bottom:8px">
+    <button class="btn btn-outline" onclick="saveClientId()" style="flex:unset;width:100%">Save &amp; Connect</button>
+    <br><br>
+    <p style="color:var(--muted)">Already have a Client ID saved? <a href="#" onclick="handleDriveAuth();document.getElementById('setup-box').classList.remove('visible');return false" style="color:var(--accent)">Try connecting again</a></p>
+  </div>
+
+</main>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────
+// CONFIG — paste your Google OAuth Client ID here, or enter it in the UI
+// ─────────────────────────────────────────────────────────────────────
+let CLIENT_ID = localStorage.getItem('docscan_client_id') || '';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+
+// ── State ──
+let pages = [];
+let scanMode = 'bw';
+let fileFormat = 'pdf';
+let cameraStream = null;
+let accessToken = null;
+let tokenExpiry = 0;
+
+// ── Google Identity Services ──
+let gisLoaded = false;
+let tokenClient = null;
+
+function loadGIS() {
+  if (document.getElementById('gis-script')) return;
+  const s = document.createElement('script');
+  s.id = 'gis-script';
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.async = true;
+  s.defer = true;
+  s.onload = () => {
+    gisLoaded = true;
+    if (CLIENT_ID) initTokenClient();
+  };
+  document.head.appendChild(s);
+}
+
+function initTokenClient() {
+  if (!gisLoaded || !CLIENT_ID) return;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp.error) { setStatus('Drive auth failed: ' + resp.error, 'err'); return; }
+      accessToken = resp.access_token;
+      tokenExpiry = Date.now() + (resp.expires_in - 60) * 1000;
+      setDriveConnected(true);
+      setStatus('Drive connected — ready to upload', 'ok');
+    }
+  });
+}
+
+function handleDriveAuth() {
+  if (!CLIENT_ID) {
+    document.getElementById('setup-box').classList.toggle('visible');
+    return;
+  }
+  if (!gisLoaded) { setStatus('Loading auth library...', 'info'); loadGIS(); setTimeout(handleDriveAuth, 1500); return; }
+  if (!tokenClient) initTokenClient();
+  if (accessToken && Date.now() < tokenExpiry) { setStatus('Already connected to Drive', 'ok'); return; }
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function saveClientId() {
+  const val = document.getElementById('client-id-input').value.trim();
+  if (!val) { setStatus('Please enter a Client ID', 'err'); return; }
+  CLIENT_ID = val;
+  localStorage.setItem('docscan_client_id', val);
+  document.getElementById('setup-box').classList.remove('visible');
+  if (gisLoaded) initTokenClient();
+  handleDriveAuth();
+}
+
+function setDriveConnected(on) {
+  const btn = document.getElementById('drive-auth-btn');
+  document.getElementById('auth-label').textContent = on ? 'Drive ✓' : 'Connect Drive';
+  btn.className = 'drive-auth-btn' + (on ? ' connected' : '');
+  btn.style.cssText = on
+    ? 'border-color:var(--green);color:var(--green);background:#d8f3dc;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;border:1.5px solid;font-family:DM Mono,monospace;font-size:11px;cursor:pointer;'
+    : '';
+}
+
+// ── Image processing ──
+function processImage(imgEl, mode) {
+  const c = document.createElement('canvas');
+  c.width = imgEl.naturalWidth || imgEl.width;
+  c.height = imgEl.naturalHeight || imgEl.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(imgEl, 0, 0, c.width, c.height);
+  if (mode === 'raw') return c.toDataURL('image/jpeg', 0.93);
+
+  const id = ctx.getImageData(0, 0, c.width, c.height);
+  const d = id.data;
+
+  if (mode === 'bw') {
+    for (let i = 0; i < d.length; i += 4) {
+      let g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+      // Adaptive threshold-ish: boost contrast, whiten background
+      g = Math.min(255, Math.max(0, (g - 118) * 1.9 + 175));
+      d[i] = d[i+1] = d[i+2] = g;
+    }
+  } else { // color enhance
+    for (let i = 0; i < d.length; i += 4) {
+      d[i]   = Math.min(255, d[i]   * 1.12 + 8);
+      d[i+1] = Math.min(255, d[i+1] * 1.08 + 6);
+      d[i+2] = Math.min(255, d[i+2] * 1.05 + 4);
+    }
+  }
+  ctx.putImageData(id, d);
+  return c.toDataURL('image/jpeg', 0.93);
+}
+
+function addPage(dataUrl) {
+  const img = new Image();
+  img.onload = () => {
+    const processed = processImage(img, scanMode);
+    pages.push({ orig: dataUrl, proc: processed });
+    updateUI();
+    showPreview(processed);
+    document.getElementById('upload-btn').disabled = (pages.length === 0);
+    setStatus(`Page ${pages.length} added`, 'ok');
+  };
+  img.src = dataUrl;
+}
+
+function reprocess() {
+  Promise.all(pages.map(p => new Promise(res => {
+    const img = new Image(); img.src = p.orig;
+    img.onload = () => res({ ...p, proc: processImage(img, scanMode) });
+  }))).then(updated => {
+    pages = updated;
+    updateUI();
+    if (pages.length) showPreview(pages[pages.length-1].proc);
+  });
+}
+
+function setMode(m, btn) {
+  scanMode = m;
+  document.querySelectorAll('.pill[onclick^="setMode"]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (pages.length) reprocess();
+}
+function setFormat(f, btn) {
+  fileFormat = f;
+  document.querySelectorAll('.pill[onclick^="setFormat"]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function showPreview(dataUrl) {
+  const canvas = document.getElementById('preview-canvas');
+  const img = new Image();
+  img.onload = () => {
+    canvas.width = img.width; canvas.height = img.height;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    canvas.classList.add('on');
+    document.getElementById('placeholder').classList.add('hidden');
+    document.getElementById('brackets').classList.add('on');
+    document.getElementById('scan-area').classList.add('has-image');
+  };
+  img.src = dataUrl;
+}
+
+function updateUI() {
+  const strip = document.getElementById('pages-strip');
+  strip.innerHTML = '';
+  pages.forEach((p, i) => {
+    const t = document.createElement('div');
+    t.className = 'thumb';
+    t.innerHTML = `<img src="${p.proc}"><div class="del" onclick="delPage(${i},event)">✕</div><div class="num">${i+1}</div>`;
+    t.querySelector('img').onclick = () => showPreview(p.proc);
+    strip.appendChild(t);
+  });
+  const add = document.createElement('div');
+  add.className = 'add-thumb';
+  add.textContent = '+';
+  add.onclick = () => document.getElementById('file-input').click();
+  strip.appendChild(add);
+  document.getElementById('page-count').textContent = pages.length;
+  document.getElementById('pages-section').style.display = pages.length ? 'block' : 'none';
+  document.getElementById('upload-btn').disabled = pages.length === 0;
+}
+
+function delPage(i, e) {
+  e.stopPropagation();
+  pages.splice(i, 1);
+  updateUI();
+  if (!pages.length) {
+    document.getElementById('preview-canvas').classList.remove('on');
+    document.getElementById('placeholder').classList.remove('hidden');
+    document.getElementById('brackets').classList.remove('on');
+    document.getElementById('scan-area').classList.remove('has-image');
+    setStatus('Add pages to get started');
+  } else showPreview(pages[Math.min(i, pages.length-1)].proc);
+}
+
+// ── Camera ──
+async function startCamera() {
+  try {
+    setStatus('Starting camera...', 'info');
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 2048 }, height: { ideal: 2048 } }
+    });
+    const feed = document.getElementById('camera-feed');
+    feed.srcObject = cameraStream;
+    feed.classList.add('on');
+    document.getElementById('preview-canvas').classList.remove('on');
+    document.getElementById('placeholder').classList.add('hidden');
+    document.getElementById('scanline').classList.add('on');
+    document.getElementById('brackets').classList.add('on');
+    document.getElementById('controls-default').style.display = 'none';
+    document.getElementById('controls-camera').style.display = 'flex';
+    setStatus('Position document and tap Capture', 'info');
+  } catch(e) {
+    setStatus('Camera access denied — use Upload instead', 'err');
+  }
+}
+
+function capturePhoto() {
+  const feed = document.getElementById('camera-feed');
+  const c = document.createElement('canvas');
+  c.width = feed.videoWidth; c.height = feed.videoHeight;
+  c.getContext('2d').drawImage(feed, 0, 0);
+  stopCamera();
+  addPage(c.toDataURL('image/jpeg', 0.95));
+}
+
+function stopCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  const feed = document.getElementById('camera-feed');
+  feed.classList.remove('on'); feed.srcObject = null;
+  document.getElementById('scanline').classList.remove('on');
+  document.getElementById('controls-default').style.display = 'flex';
+  document.getElementById('controls-camera').style.display = 'none';
+  if (!pages.length) {
+    document.getElementById('placeholder').classList.remove('hidden');
+    document.getElementById('brackets').classList.remove('on');
+    setStatus('Add pages to get started');
+  }
+}
+
+function handleFiles(e) {
+  [...e.target.files].forEach(f => {
+    const r = new FileReader();
+    r.onload = ev => addPage(ev.target.result);
+    r.readAsDataURL(f);
+  });
+  e.target.value = '';
+}
+
+// ── PDF builder ──
+async function buildPDF() {
+  const enc = new TextEncoder();
+  const push = s => parts.push(enc.encode(s));
+  const pushRaw = b => parts.push(b);
+  const parts = [];
+  const len = () => parts.reduce((a,b) => a+b.length, 0);
+
+  // Get JPEG bytes
+  const jpegs = pages.map(p => {
+    const b64 = p.proc.split(',')[1];
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    return bytes;
+  });
+
+  const dims = await Promise.all(pages.map(p => new Promise(r=>{
+    const img=new Image(); img.src=p.proc; img.onload=()=>r({w:img.width,h:img.height});
+  })));
+
+  push('%PDF-1.4\n');
+  let obj=0;
+  const off={};
+  const catRef=++obj, pagesRef=++obj;
+  const pageObjs=[];
+
+  for(let i=0;i<pages.length;i++){
+    const imgRef=++obj;
+    off[imgRef]=len();
+    push(`${imgRef} 0 obj\n<</Type /XObject/Subtype /Image/Width ${dims[i].w}/Height ${dims[i].h}/ColorSpace /DeviceRGB/BitsPerComponent 8/Filter /DCTDecode/Length ${jpegs[i].length}>>\nstream\n`);
+    pushRaw(jpegs[i]);
+    push('\nendstream\nendobj\n');
+
+    const PW=595,PH=842;
+    let dw=PW,dh=Math.round(dims[i].h*PW/dims[i].w);
+    if(dh>PH){dh=PH;dw=Math.round(dims[i].w*PH/dims[i].h);}
+    const cx=Math.round((PW-dw)/2),cy=Math.round((PH-dh)/2);
+    const cstr=`q ${dw} 0 0 ${dh} ${cx} ${cy} cm /Im${i+1} Do Q`;
+
+    const cRef=++obj;
+    off[cRef]=len();
+    push(`${cRef} 0 obj\n<</Length ${cstr.length}>>\nstream\n${cstr}\nendstream\nendobj\n`);
+
+    const pRef=++obj;
+    off[pRef]=len();
+    push(`${pRef} 0 obj\n<</Type /Page/Parent ${pagesRef} 0 R/MediaBox [0 0 ${PW} ${PH}]/Contents ${cRef} 0 R/Resources <</XObject <</Im${i+1} ${imgRef} 0 R>>>>>>\nendobj\n`);
+    pageObjs.push(pRef);
+  }
+
+  off[pagesRef]=len();
+  push(`${pagesRef} 0 obj\n<</Type /Pages/Kids [${pageObjs.map(r=>`${r} 0 R`).join(' ')}]/Count ${pages.length}>>\nendobj\n`);
+  off[catRef]=len();
+  push(`${catRef} 0 obj\n<</Type /Catalog/Pages ${pagesRef} 0 R>>\nendobj\n`);
+
+  const xpos=len();
+  push(`xref\n0 ${obj+1}\n0000000000 65535 f \n`);
+  for(let i=1;i<=obj;i++) push(String(off[i]).padStart(10,'0')+' 00000 n \n');
+  push(`trailer\n<</Size ${obj+1}/Root ${catRef} 0 R>>\nstartxref\n${xpos}\n%%EOF\n`);
+
+  const total=parts.reduce((a,b)=>a+b.length,0);
+  const out=new Uint8Array(total); let pos=0;
+  for(const p of parts){out.set(p,pos);pos+=p.length;}
+  return new Blob([out],{type:'application/pdf'});
+}
+
+function buildJPG() {
+  if(pages.length===1){
+    const b64=pages[0].proc.split(',')[1];
+    const bin=atob(b64);
+    const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    return Promise.resolve(new Blob([bytes],{type:'image/jpeg'}));
+  }
+  return new Promise(async res=>{
+    const imgs=await Promise.all(pages.map(p=>new Promise(r=>{const i=new Image();i.src=p.proc;i.onload=()=>r(i);})));
+    const maxW=Math.max(...imgs.map(i=>i.width));
+    const totalH=imgs.reduce((a,i)=>a+Math.round(i.height*maxW/i.width),0);
+    const c=document.createElement('canvas');
+    c.width=maxW;c.height=totalH;
+    const ctx=c.getContext('2d');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,maxW,totalH);
+    let y=0;
+    for(const img of imgs){const h=Math.round(img.height*maxW/img.width);ctx.drawImage(img,0,y,maxW,h);y+=h;}
+    c.toBlob(b=>res(b),'image/jpeg',0.93);
+  });
+}
+
+// ── Drive upload ──
+async function sendToDrive() {
+  if(!pages.length){setStatus('No pages to send','err');return;}
+
+  // Check auth
+  if(!accessToken || Date.now()>=tokenExpiry){
+    if(!CLIENT_ID){
+      document.getElementById('setup-box').classList.add('visible');
+      setStatus('Set up Google Drive first (see instructions below)','info');
+      return;
+    }
+    setStatus('Connecting to Drive...','info');
+    handleDriveAuth();
+    // Re-queue after auth completes (auth callback will call back)
+    return;
+  }
+
+  const btn=document.getElementById('upload-btn');
+  btn.disabled=true;
+  setStatus('Building document...','info');
+
+  try{
+    const blob=fileFormat==='pdf' ? await buildPDF() : await buildJPG();
+    const fname=(document.getElementById('filename').value.trim()||'scan-'+new Date().toISOString().slice(0,10))+'.'+fileFormat;
+    const mime=fileFormat==='pdf'?'application/pdf':'image/jpeg';
+    setStatus('Uploading to Drive...','info');
+
+    // Multipart upload
+    const boundary='docscan'+Date.now();
+    const meta=JSON.stringify({name:fname,mimeType:mime});
+    const metaPart=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`;
+    const mediaPart=`--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`;
+    const closing=`\r\n--${boundary}--`;
+
+    const enc=new TextEncoder();
+    const bodyParts=[enc.encode(metaPart),enc.encode(mediaPart),new Uint8Array(await blob.arrayBuffer()),enc.encode(closing)];
+    const totalLen=bodyParts.reduce((a,b)=>a+b.length,0);
+    const body=new Uint8Array(totalLen);let p=0;
+    for(const part of bodyParts){body.set(part,p);p+=part.length;}
+
+    const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',{
+      method:'POST',
+      headers:{
+        'Authorization':'Bearer '+accessToken,
+        'Content-Type':`multipart/related; boundary=${boundary}`,
+        'Content-Length':String(totalLen)
+      },
+      body
+    });
+
+    if(!res.ok){
+      const err=await res.json();
+      throw new Error(err.error?.message||res.statusText);
+    }
+
+    const json=await res.json();
+    const link=json.webViewLink||`https://drive.google.com/file/d/${json.id}/view`;
+    setStatus(`✓ Saved: <a href="${link}" target="_blank" class="drive-link">${fname}</a>`,'ok');
+    btn.classList.add('uploaded');
+    btn.textContent='✓ Uploaded — Send Another?';
+    setTimeout(()=>{btn.classList.remove('uploaded');btn.innerHTML='<svg width="16" height="16" viewBox="0 0 87.3 78" fill="currentColor" style="opacity:0.8;margin-right:2px"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#fff" opacity=".6"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.5h27.5z" fill="#fff" opacity=".6"/></svg>Send to Google Drive';btn.disabled=false;},4000);
+  }catch(err){
+    setStatus('Upload failed: '+err.message,'err');
+    btn.disabled=false;
+  }
+}
+
+// ── Status ──
+function setStatus(msg,type=''){
+  const el=document.getElementById('status');
+  el.className='status'+(type?' '+type:'');
+  if(type==='info'&&msg.includes('...')){
+    el.innerHTML=`<div class="spinner"></div><span>${msg}</span>`;
+  }else{
+    el.innerHTML=msg;
+  }
+}
+
+// ── Init ──
+loadGIS();
+if(CLIENT_ID&&gisLoaded) initTokenClient();
+</script>
+</body>
+</html>
