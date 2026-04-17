@@ -630,8 +630,19 @@ let cameraStream = null;
 let accessToken = null;
 let tokenExpiry = 0;
 
-// ── Redirect-based OAuth (works on iOS) ──
-function handleDriveAuth() {
+// ── PKCE helpers ──
+function b64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function generatePKCE() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  return { verifier, challenge };
+}
+
+// ── Auth ──
+async function handleDriveAuth() {
   if (!CLIENT_ID) {
     document.getElementById('setup-box').classList.toggle('visible');
     return;
@@ -640,52 +651,79 @@ function handleDriveAuth() {
     setStatus('Already connected to Drive', 'ok');
     return;
   }
-  // Save any pending pages to sessionStorage before redirect
+  // Save pages before redirect
   if (pages.length) {
     try { sessionStorage.setItem('docscan_pages', JSON.stringify(pages)); } catch(e) {}
   }
-  // Redirect to Google OAuth
+  // PKCE
+  const { verifier, challenge } = await generatePKCE();
+  sessionStorage.setItem('pkce_verifier', verifier);
+
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
-    response_type: 'token',
+    response_type: 'code',
     scope: SCOPES,
-    include_granted_scopes: 'true',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    access_type: 'online',
   });
   window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
 }
 
-function checkRedirectToken() {
-  // Check for token in URL hash after redirect
-  const hash = window.location.hash.substring(1);
-  if (!hash) return;
-  const params = new URLSearchParams(hash);
-  const token = params.get('access_token');
-  const expiresIn = params.get('expires_in');
-  if (token) {
-    accessToken = token;
-    tokenExpiry = Date.now() + (parseInt(expiresIn || '3600') - 60) * 1000;
-    // Clean up URL
+async function checkRedirectCode() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const error = params.get('error');
+
+  if (error) {
+    setStatus('Auth failed: ' + error, 'err');
     history.replaceState(null, '', window.location.pathname);
+    return;
+  }
+  if (!code) return;
+
+  // Clean URL immediately
+  history.replaceState(null, '', window.location.pathname);
+  setStatus('Finishing sign-in...', 'info');
+
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  sessionStorage.removeItem('pkce_verifier');
+
+  // Exchange code for token via Google's token endpoint
+  // NOTE: PKCE for public clients — no client_secret needed
+  const resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: CLIENT_ID,
+      code,
+      code_verifier: verifier || '',
+      grant_type: 'authorization_code',
+      redirect_uri: REDIRECT_URI,
+    })
+  });
+
+  const data = await resp.json();
+  if (data.access_token) {
+    accessToken = data.access_token;
+    tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
     setDriveConnected(true);
-    setStatus('Drive connected — ready to upload', 'ok');
-    // Restore pages if we had them before redirect
+    // Restore pages
     try {
       const saved = sessionStorage.getItem('docscan_pages');
       if (saved) {
-        const restored = JSON.parse(saved);
+        pages = JSON.parse(saved);
         sessionStorage.removeItem('docscan_pages');
-        restored.forEach(p => {
-          pages.push(p);
-        });
         updateUI();
         if (pages.length) showPreview(pages[pages.length-1].proc);
         setStatus(`Drive connected — ${pages.length} page${pages.length>1?'s':''} ready to upload`, 'ok');
+      } else {
+        setStatus('Drive connected — ready to upload', 'ok');
       }
-    } catch(e) {}
-  } else if (params.get('error')) {
-    setStatus('Auth failed: ' + params.get('error'), 'err');
-    history.replaceState(null, '', window.location.pathname);
+    } catch(e) { setStatus('Drive connected — ready to upload', 'ok'); }
+  } else {
+    setStatus('Token exchange failed: ' + (data.error_description || data.error || 'unknown'), 'err');
   }
 }
 
@@ -1040,8 +1078,7 @@ function setStatus(msg,type=''){
 }
 
 // ── Init ──
-checkRedirectToken();
-// Show actual URLs in setup box
+checkRedirectCode();
 const _o = document.getElementById('show-origin');
 const _r = document.getElementById('show-redirect');
 if(_o) _o.textContent = window.location.origin;
