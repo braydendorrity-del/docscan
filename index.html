@@ -601,7 +601,8 @@ input[type="text"]::placeholder { color: var(--muted); }
       <li>Create a project → Enable <strong>Google Drive API</strong></li>
       <li>Go to <strong>APIs &amp; Services → Credentials</strong></li>
       <li>Create an <strong>OAuth 2.0 Client ID</strong> → Web application</li>
-      <li>Add this page's URL to <strong>Authorized JavaScript origins</strong></li>
+      <li>Add your GitHub Pages URL to <strong>Authorized JavaScript origins</strong><br><code id="show-origin"></code></li>
+      <li>Add the same URL to <strong>Authorized redirect URIs</strong><br><code id="show-redirect"></code></li>
       <li>Paste your Client ID below and tap Save</li>
     </ol>
     <br>
@@ -615,10 +616,11 @@ input[type="text"]::placeholder { color: var(--muted); }
 
 <script>
 // ─────────────────────────────────────────────────────────────────────
-// CONFIG — paste your Google OAuth Client ID here, or enter it in the UI
+// CONFIG
 // ─────────────────────────────────────────────────────────────────────
 let CLIENT_ID = localStorage.getItem('docscan_client_id') || '';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const REDIRECT_URI = window.location.origin + window.location.pathname;
 
 // ── State ──
 let pages = [];
@@ -628,48 +630,63 @@ let cameraStream = null;
 let accessToken = null;
 let tokenExpiry = 0;
 
-// ── Google Identity Services ──
-let gisLoaded = false;
-let tokenClient = null;
-
-function loadGIS() {
-  if (document.getElementById('gis-script')) return;
-  const s = document.createElement('script');
-  s.id = 'gis-script';
-  s.src = 'https://accounts.google.com/gsi/client';
-  s.async = true;
-  s.defer = true;
-  s.onload = () => {
-    gisLoaded = true;
-    if (CLIENT_ID) initTokenClient();
-  };
-  document.head.appendChild(s);
-}
-
-function initTokenClient() {
-  if (!gisLoaded || !CLIENT_ID) return;
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (resp) => {
-      if (resp.error) { setStatus('Drive auth failed: ' + resp.error, 'err'); return; }
-      accessToken = resp.access_token;
-      tokenExpiry = Date.now() + (resp.expires_in - 60) * 1000;
-      setDriveConnected(true);
-      setStatus('Drive connected — ready to upload', 'ok');
-    }
-  });
-}
-
+// ── Redirect-based OAuth (works on iOS) ──
 function handleDriveAuth() {
   if (!CLIENT_ID) {
     document.getElementById('setup-box').classList.toggle('visible');
     return;
   }
-  if (!gisLoaded) { setStatus('Loading auth library...', 'info'); loadGIS(); setTimeout(handleDriveAuth, 1500); return; }
-  if (!tokenClient) initTokenClient();
-  if (accessToken && Date.now() < tokenExpiry) { setStatus('Already connected to Drive', 'ok'); return; }
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+  if (accessToken && Date.now() < tokenExpiry) {
+    setStatus('Already connected to Drive', 'ok');
+    return;
+  }
+  // Save any pending pages to sessionStorage before redirect
+  if (pages.length) {
+    try { sessionStorage.setItem('docscan_pages', JSON.stringify(pages)); } catch(e) {}
+  }
+  // Redirect to Google OAuth
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'token',
+    scope: SCOPES,
+    include_granted_scopes: 'true',
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+}
+
+function checkRedirectToken() {
+  // Check for token in URL hash after redirect
+  const hash = window.location.hash.substring(1);
+  if (!hash) return;
+  const params = new URLSearchParams(hash);
+  const token = params.get('access_token');
+  const expiresIn = params.get('expires_in');
+  if (token) {
+    accessToken = token;
+    tokenExpiry = Date.now() + (parseInt(expiresIn || '3600') - 60) * 1000;
+    // Clean up URL
+    history.replaceState(null, '', window.location.pathname);
+    setDriveConnected(true);
+    setStatus('Drive connected — ready to upload', 'ok');
+    // Restore pages if we had them before redirect
+    try {
+      const saved = sessionStorage.getItem('docscan_pages');
+      if (saved) {
+        const restored = JSON.parse(saved);
+        sessionStorage.removeItem('docscan_pages');
+        restored.forEach(p => {
+          pages.push(p);
+        });
+        updateUI();
+        if (pages.length) showPreview(pages[pages.length-1].proc);
+        setStatus(`Drive connected — ${pages.length} page${pages.length>1?'s':''} ready to upload`, 'ok');
+      }
+    } catch(e) {}
+  } else if (params.get('error')) {
+    setStatus('Auth failed: ' + params.get('error'), 'err');
+    history.replaceState(null, '', window.location.pathname);
+  }
 }
 
 function saveClientId() {
@@ -678,17 +695,15 @@ function saveClientId() {
   CLIENT_ID = val;
   localStorage.setItem('docscan_client_id', val);
   document.getElementById('setup-box').classList.remove('visible');
-  if (gisLoaded) initTokenClient();
   handleDriveAuth();
 }
 
 function setDriveConnected(on) {
   const btn = document.getElementById('drive-auth-btn');
   document.getElementById('auth-label').textContent = on ? 'Drive ✓' : 'Connect Drive';
-  btn.className = 'drive-auth-btn' + (on ? ' connected' : '');
   btn.style.cssText = on
     ? 'border-color:var(--green);color:var(--green);background:#d8f3dc;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;border:1.5px solid;font-family:DM Mono,monospace;font-size:11px;cursor:pointer;'
-    : '';
+    : 'display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--surface);color:var(--ink2);font-family:DM Mono,monospace;font-size:11px;cursor:pointer;';
 }
 
 // ── Image processing ──
@@ -1025,8 +1040,12 @@ function setStatus(msg,type=''){
 }
 
 // ── Init ──
-loadGIS();
-if(CLIENT_ID&&gisLoaded) initTokenClient();
+checkRedirectToken();
+// Show actual URLs in setup box
+const _o = document.getElementById('show-origin');
+const _r = document.getElementById('show-redirect');
+if(_o) _o.textContent = window.location.origin;
+if(_r) _r.textContent = window.location.origin + window.location.pathname;
 </script>
 </body>
 </html>
